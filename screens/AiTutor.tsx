@@ -30,7 +30,7 @@ const parseInline = (text: string, isUser: boolean) => {
 };
 
 // Markdown Renderer Component
-const MarkdownRenderer: React.FC<{ content: string; isUser: boolean }> = ({ content, isUser }) => {
+const MarkdownRenderer: React.FC<{ content: string; isUser: boolean; codeLabel?: string }> = ({ content, isUser, codeLabel = 'code' }) => {
   // Split content by code blocks (```)
   const parts = content.split(/```/);
   
@@ -47,7 +47,7 @@ const MarkdownRenderer: React.FC<{ content: string; isUser: boolean }> = ({ cont
                   <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/50"></div>
                   <div className="w-2.5 h-2.5 rounded-full bg-green-500/50"></div>
                 </div>
-                <span className="text-xs text-gray-400 font-mono">code</span>
+                <span className="text-xs text-gray-400 font-mono">{codeLabel}</span>
               </div>
               <pre className="p-3 overflow-x-auto text-xs sm:text-sm font-mono text-gray-300 whitespace-pre-wrap">
                 <code>{part.trim()}</code>
@@ -105,8 +105,22 @@ const AiTutor: React.FC = () => {
   const navigate = useNavigate();
   const STORAGE_KEY = 'ethiolearn_ai_chat_history';
 
-  // Language state
-  const [language, setLanguage] = useState<'en' | 'am'>('en');
+  // Load initial language state
+  const [language, setLanguage] = useState<'en' | 'am'>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        // Check if it's the new object format
+        if (!Array.isArray(parsed) && parsed.language) {
+          return parsed.language;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load language settings", e);
+    }
+    return 'en';
+  });
 
   const translations = {
     en: {
@@ -116,7 +130,15 @@ const AiTutor: React.FC = () => {
       you: 'You',
       bot: 'EthioLearn AI',
       defaultMsg: "Hello! I'm your AI tutor. How can I help you with your studies today? You can ask me in Amharic or English.",
-      sendError: "Sorry, I'm having trouble connecting right now. Please try again later."
+      sendError: "Sorry, I'm having trouble connecting right now. Please try again later.",
+      back: "Back",
+      clear: "Clear Chat",
+      voice: "Voice Input",
+      send: "Send",
+      copy: "Copy",
+      like: "Like",
+      code: "code",
+      languageToggle: "Switch Language"
     },
     am: {
       title: 'AI አስጠኚ',
@@ -125,21 +147,43 @@ const AiTutor: React.FC = () => {
       you: 'እርስዎ',
       bot: 'ኢትዮLearn AI',
       defaultMsg: "ሰላም! እኔ የእርስዎ AI አስጠኚ ነኝ። ዛሬ በጥናትዎ እንዴት ልርዳዎት እችላለሁ? በአማርኛ ወይም በእንግሊዝኛ መጠየቅ ይችላሉ።",
-      sendError: "ይቅርታ፣ ግንኙነት መፍጠር አልተቻለም። እባክዎ ትንሽ ቆይተው እንደገና ይሞክሩ።"
+      sendError: "ይቅርታ፣ ግንኙነት መፍጠር አልተቻለም። እባክዎ ትንሽ ቆይተው እንደገና ይሞክሩ።",
+      back: "ተመለስ",
+      clear: "ውይይቱን አጥፋ",
+      voice: "በድምጽ ይዘዙ",
+      send: "ላክ",
+      copy: "ቅዳ",
+      like: "ውደድ",
+      code: "ኮድ",
+      languageToggle: "ቋንቋ ቀይር"
     }
   };
 
   const t = translations[language];
 
-  // Initialize state from localStorage
+  // Initialize messages state from localStorage
   const [messages, setMessages] = useState<ChatMessage[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
-        return JSON.parse(saved).map((m: any) => ({
-          ...m,
-          timestamp: new Date(m.timestamp)
-        }));
+        const parsed = JSON.parse(saved);
+        
+        let loadedMessages = [];
+        // Handle legacy array format
+        if (Array.isArray(parsed)) {
+          loadedMessages = parsed;
+        } 
+        // Handle new object format
+        else if (parsed.messages && Array.isArray(parsed.messages)) {
+          loadedMessages = parsed.messages;
+        }
+
+        if (loadedMessages.length > 0) {
+          return loadedMessages.map((m: any) => ({
+            ...m,
+            timestamp: new Date(m.timestamp)
+          }));
+        }
       }
     } catch (e) {
       console.error("Failed to load history", e);
@@ -148,7 +192,7 @@ const AiTutor: React.FC = () => {
       {
         id: '1',
         role: 'model',
-        text: translations.en.defaultMsg, // Default to English initially
+        text: translations[language].defaultMsg, // Use current language default
         timestamp: new Date()
       }
     ];
@@ -166,10 +210,14 @@ const AiTutor: React.FC = () => {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  // Save to localStorage on change
+  // Save both messages and language preferences
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
-  }, [messages]);
+    const dataToSave = {
+      messages,
+      language
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave));
+  }, [messages, language]);
 
   const handleSend = async () => {
     if (!inputValue.trim()) return;
@@ -186,13 +234,11 @@ const AiTutor: React.FC = () => {
     setIsLoading(true);
 
     try {
-      // Prepare history for Gemini
       const history = messages.map(m => ({
         role: m.role,
         parts: [{ text: m.text }]
       }));
 
-      // Pass language to service
       const responseText = await sendMessageToGemini(userMsg.text, history, language);
 
       const botMsg: ChatMessage = {
@@ -229,7 +275,8 @@ const AiTutor: React.FC = () => {
         timestamp: new Date()
       };
       setMessages([defaultMsg]);
-      localStorage.removeItem(STORAGE_KEY);
+      // We do NOT remove item from localStorage here because we want to persist the language.
+      // The useEffect will overwrite the storage with the cleared messages array and current language.
     }
   };
   
@@ -241,19 +288,20 @@ const AiTutor: React.FC = () => {
     <div className="relative flex h-screen w-full flex-col bg-background-light dark:bg-background-dark overflow-hidden">
       {/* Header */}
       <header className="flex items-center bg-white dark:bg-background-dark p-4 border-b border-gray-200 dark:border-gray-800 shrink-0 gap-2">
-        <button onClick={() => navigate(-1)} className="flex size-10 items-center justify-center text-gray-800 dark:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
+        <button onClick={() => navigate(-1)} title={t.back} className="flex size-10 items-center justify-center text-gray-800 dark:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
           <span className="material-symbols-outlined">arrow_back</span>
         </button>
         <h2 className="text-lg font-bold flex-1 text-center">{t.title}</h2>
         
         <button 
             onClick={toggleLanguage} 
+            title={t.languageToggle}
             className="flex items-center justify-center px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-primary font-bold text-sm hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
         >
             {language === 'en' ? 'አማ' : 'EN'}
         </button>
 
-        <button onClick={handleClear} className="flex size-10 items-center justify-center text-gray-800 dark:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
+        <button onClick={handleClear} title={t.clear} className="flex size-10 items-center justify-center text-gray-800 dark:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800">
           <span className="material-symbols-outlined">delete</span>
         </button>
       </header>
@@ -275,13 +323,13 @@ const AiTutor: React.FC = () => {
                   ? 'bg-primary rounded-br-sm' 
                   : 'bg-white dark:bg-gray-800 rounded-bl-sm border border-gray-100 dark:border-gray-700'
               }`}>
-                <MarkdownRenderer content={msg.text} isUser={msg.role === 'user'} />
+                <MarkdownRenderer content={msg.text} isUser={msg.role === 'user'} codeLabel={t.code} />
               </div>
               
               {msg.role === 'model' && (
                 <div className="flex gap-2 pt-1 px-1">
-                   <button className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"><span className="material-symbols-outlined text-sm">thumb_up</span></button>
-                   <button className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"><span className="material-symbols-outlined text-sm">content_copy</span></button>
+                   <button title={t.like} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"><span className="material-symbols-outlined text-sm">thumb_up</span></button>
+                   <button title={t.copy} className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400"><span className="material-symbols-outlined text-sm">content_copy</span></button>
                 </div>
               )}
             </div>
@@ -321,13 +369,14 @@ const AiTutor: React.FC = () => {
               placeholder={t.placeholder} 
               type="text"
             />
-            <button className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center w-9 h-9 text-gray-500 hover:text-primary dark:hover:text-white transition-colors">
+            <button title={t.voice} className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center justify-center w-9 h-9 text-gray-500 hover:text-primary dark:hover:text-white transition-colors">
               <span className="material-symbols-outlined">mic</span>
             </button>
           </div>
           <button 
             onClick={handleSend}
             disabled={isLoading || !inputValue.trim()}
+            title={t.send}
             className="flex items-center justify-center w-12 h-12 rounded-full bg-primary text-white shrink-0 shadow-md hover:bg-green-600 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
           >
             <span className="material-symbols-outlined">send</span>
