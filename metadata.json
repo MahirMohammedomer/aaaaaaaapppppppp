@@ -1,0 +1,7 @@
+{
+  "name": "EthioLearn AI 1",
+  "description": "An AI-powered educational platform for Ethiopian students featuring study plans, AI tutoring, and exam prep.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
